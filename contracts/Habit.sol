@@ -53,6 +53,8 @@ contract Habit {
         habit.totalAmount = msg.value;
         habit.totalReports = totalReports;
         habit.interval = interval;
+        habit.title = title;
+        habit.committment = committment;
 
         _userHabits[habit.user].push(habitId);
 
@@ -69,7 +71,7 @@ contract Habit {
         return _userHabits[user];
     }
 
-     function getUserHabitNonce(address user) external view returns (uint256 userHabitLength) {
+    function getUserHabitNonce(address user) external view returns (uint256 userHabitLength) {
         return _userHabits[user].length + 1;
     }
 
