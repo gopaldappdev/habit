@@ -10,6 +10,7 @@ contract Habit {
     mapping(uint256 => HabitCore) private _habits;
     mapping(uint256 => ReportCore) private _reports;
     mapping(address => uint256[]) private _userHabits;
+    mapping(address => uint256[]) private _userReports;
     mapping(uint256 => uint256) private indexOfHabitInPendingAgreements;
     mapping(uint256 => uint256) private indexOfReportInPendingValidations;
     mapping(address => uint256[]) private _pendingAgreements; 
@@ -45,6 +46,7 @@ contract Habit {
     /*State Variables */
     uint256 public totalAmountDeposited;
     uint256 public totalAmountWithdrawn;
+    bool amountTransferLock = false;
 
     /*Events */
     /// @notice This event is emitted when a user creates a new Habit
@@ -157,6 +159,14 @@ contract Habit {
         return _pendingValidations[user];
     }
 
+    function getReport(uint256 reportId) external view returns (ReportCore memory habitReport) {
+        return _reports[reportId];
+    }
+
+    function getUserReports(address user) external view returns (uint256[] memory userReports) {
+        return _userReports[user];
+    }
+
     function hashHabit(
         address user,
         bytes32 titleHash,
@@ -250,8 +260,8 @@ contract Habit {
             habit.ended = true;
             uint amountToSend = (habit.totalAmount * habit.successCount) / habit.totalReports;
             if (amountToSend > 0) {
-                habit.user.transfer(amountToSend);
-                totalAmountWithdrawn += amountToSend;
+                // TODO: amount will be transfered when all the reports have been approved.
+                // transferAmountToUser(habit.user, amountToSend);
                 emit HabitCompleted(
                     habitId,
                     habit.user,
@@ -272,6 +282,7 @@ contract Habit {
         currReport.proofUrl = proofUrl;
         currReport.reportedAt = block.timestamp;
         _reports[reportId] = currReport;
+        _userReports[habit.user].push(reportId);
         if (habit.validatorIsSelf) {
             currReport.reportApprovalStatus = 1;
         } else {
@@ -369,4 +380,16 @@ contract Habit {
 
     // When a habit is declined, user can delete that habit
     function deleteHabit() public {}
+
+    function transferAmountToUser(
+        address payable user, 
+        uint amount
+    ) public payable {
+        require(!amountTransferLock);
+        amountTransferLock = true;
+        user.transfer(amount);
+        totalAmountWithdrawn += amount;
+        amountTransferLock = false;
+    }
+
 }
