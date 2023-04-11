@@ -12,6 +12,7 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
     const totalReports = networkConfig[chainId]["totalReports"]
     const interval = networkConfig[chainId]["interval"]
     const amount = networkConfig[chainId]["amount"]
+    const validator = networkConfig[chainId]["validator"]
 
     if (chainId == 31337) {
         const habitFactory = await ethers.getContractFactory("Habit")
@@ -25,6 +26,7 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
             committed,
             totalReports,
             interval,
+            validator,
             {
                 value: ethers.utils.parseEther(amount),
             }
@@ -43,6 +45,7 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
             committed,
             totalReports,
             interval,
+            validator,
             {
                 value: ethers.utils.parseEther(amount),
             }

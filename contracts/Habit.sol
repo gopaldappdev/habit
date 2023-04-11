@@ -8,10 +8,20 @@ pragma solidity ^0.8.4;
 contract Habit {
     /*Type declarations*/
     mapping(uint256 => HabitCore) private _habits;
+    mapping(uint256 => ReportCore) private _reports;
     mapping(address => uint256[]) private _userHabits;
+    mapping(address => uint256[]) private _userReports;
+    mapping(uint256 => uint256) private indexOfHabitInPendingAgreements;
+    mapping(uint256 => uint256) private indexOfReportInPendingValidations;
+    mapping(address => uint256[]) private _pendingAgreements; 
+    mapping(address => uint256[]) private _pendingValidations;
 
+    /// @param status Can have value 0, 1, -1. Where 0 denotes pending, 1 denotes accepted and -1 denotes declined.
     struct HabitCore {
         address payable user;
+        address payable validator;
+        int status;
+        bool validatorIsSelf;
         string title;
         string committment;
         uint256 startTime;
@@ -24,9 +34,19 @@ contract Habit {
         uint256 amountWithdrawn;
     }
 
+    /// @param reportApprovalStatus Can have value 0, 1, -1. Where 0 denotes pending, 1 denotes accepted and -1 denotes declined.
+    struct ReportCore {
+        uint256 habitId;
+        int reportApprovalStatus;
+        string journalEntry;
+        string proofUrl;
+        uint256 reportedAt;
+    }
+
     /*State Variables */
     uint256 public totalAmountDeposited;
     uint256 public totalAmountWithdrawn;
+    bool amountTransferLock = false;
 
     /*Events */
     /// @notice This event is emitted when a user creates a new Habit
@@ -43,7 +63,30 @@ contract Habit {
         uint256 startTime,
         uint256 totalAmount,
         uint256 totalReports,
-        uint256 interval
+        uint256 interval,
+        address validator
+    );
+
+    /// @notice This event is emitted when a user accepts the role of validator for a habit
+    event HabitAccepted(
+        uint256 indexed habitId, 
+        address validator
+    );
+
+    /// @notice This event is emitted when a user declines the role of validator for a habit
+    event HabitDeclined(
+        uint256 indexed habitId, 
+        address validator
+    );
+
+    event ReportApproved(
+        uint256 indexed reportId, 
+        address validator
+    );
+
+    event ReportDeclined(
+        uint256 indexed reportId, 
+        address validator
     );
 
     /// @notice This event is emitted when a user reports for his/her committment
@@ -108,6 +151,22 @@ contract Habit {
         return _userHabits[user].length + 1;
     }
 
+    function getHabitValidatorRequests(address user) external view returns (uint256[] memory pendingValidatorRequests) {
+        return _pendingAgreements[user];
+    }
+
+    function getReportApprovalRequests(address user) external view returns (uint256[] memory pendingReportValidations) {
+        return _pendingValidations[user];
+    }
+
+    function getReport(uint256 reportId) external view returns (ReportCore memory habitReport) {
+        return _reports[reportId];
+    }
+
+    function getUserReports(address user) external view returns (uint256[] memory userReports) {
+        return _userReports[user];
+    }
+
     function hashHabit(
         address user,
         bytes32 titleHash,
@@ -120,7 +179,8 @@ contract Habit {
         string memory title,
         string memory committment,
         uint256 totalReports,
-        uint256 interval
+        uint256 interval,
+        address validator
     ) public payable {
         uint habitId = hashHabit(
             msg.sender,
@@ -140,12 +200,36 @@ contract Habit {
         habit.interval = interval;
         habit.title = title;
         habit.committment = committment;
+        habit.validator = payable(validator);
+        if (habit.validator == msg.sender) {
+            habit.validatorIsSelf = true;
+            habit.status = 1;
+        } else {
+            habit.status = 0;
+            _pendingAgreements[validator].push(habitId);
+            indexOfHabitInPendingAgreements[habitId] = _pendingAgreements[validator].length-1;
+        }
 
         _userHabits[habit.user].push(habitId);
-
         totalAmountDeposited += msg.value;
 
-        emit HabitCreated(habit.user, habitId, habit.startTime, msg.value, totalReports, interval);
+        emit HabitCreated(
+            habit.user,
+            habitId,
+            habit.startTime,
+            msg.value,
+            totalReports,
+            interval,
+            validator
+        );
+    }
+
+    function hashReport(
+        address user,
+        uint256 habitId,
+        uint256 reportedAt
+    ) public pure virtual returns (uint256) {
+        return uint256(keccak256(abi.encode(user, habitId, reportedAt)));
     }
 
     function report(
@@ -176,8 +260,8 @@ contract Habit {
             habit.ended = true;
             uint amountToSend = (habit.totalAmount * habit.successCount) / habit.totalReports;
             if (amountToSend > 0) {
-                habit.user.transfer(amountToSend);
-                totalAmountWithdrawn += amountToSend;
+                // TODO: amount will be transfered when all the reports have been approved.
+                // transferAmountToUser(habit.user, amountToSend);
                 emit HabitCompleted(
                     habitId,
                     habit.user,
@@ -190,6 +274,23 @@ contract Habit {
                 );
             }
         }
+
+        uint reportId = hashReport(habit.user, habitId, block.timestamp);
+        ReportCore memory currReport;
+        currReport.habitId = habitId;
+        currReport.journalEntry = journalEntry;
+        currReport.proofUrl = proofUrl;
+        currReport.reportedAt = block.timestamp;
+        _reports[reportId] = currReport;
+        _userReports[habit.user].push(reportId);
+        if (habit.validatorIsSelf) {
+            currReport.reportApprovalStatus = 1;
+        } else {
+            currReport.reportApprovalStatus = 0;
+            _pendingValidations[habit.validator].push(reportId);
+            indexOfReportInPendingValidations[reportId] = _pendingValidations[habit.validator].length-1;
+        }
+
         emit HabitReported(
             habitId,
             habit.user,
@@ -200,4 +301,95 @@ contract Habit {
             habit.missedCount
         );
     }
+
+    function acceptValidatorRole(
+        uint256 habitId, 
+        address validator
+    ) public {
+        HabitCore storage habit = _habits[habitId];
+        require(habit.status != 0, "Habit can't be accepted!");
+
+        habit.status = 1;
+        deleteFromListUsingIndexMapping(
+            _pendingAgreements[validator], 
+            habitId, 
+            indexOfHabitInPendingAgreements
+        );
+        emit HabitAccepted(habitId, validator);
+    }
+
+    function declineValidatorRole(
+        uint256 habitId, 
+        address validator
+    ) public {
+        HabitCore storage habit = _habits[habitId];
+        require(habit.status != 0, "Habit can't be declined!");
+
+        habit.status = -1;
+        deleteFromListUsingIndexMapping(
+            _pendingAgreements[validator], 
+            habitId, 
+            indexOfHabitInPendingAgreements
+        );    
+        emit HabitDeclined(habitId, validator);
+    }
+
+    function validateReport(
+        uint256 reportId, 
+        address validator
+    ) public {
+        ReportCore storage currReport = _reports[reportId];
+        currReport.reportApprovalStatus = 1;
+        deleteFromListUsingIndexMapping(
+            _pendingValidations[validator], 
+            reportId, 
+            indexOfReportInPendingValidations
+        );
+        emit ReportApproved(reportId, validator);
+    }
+
+    function declineReport(
+        uint256 reportId, 
+        address validator
+    ) public {
+        ReportCore storage currReport = _reports[reportId];
+        currReport.reportApprovalStatus = -1;
+        deleteFromListUsingIndexMapping(
+            _pendingValidations[validator], 
+            reportId, 
+            indexOfReportInPendingValidations
+        );
+        emit ReportDeclined(reportId, validator);
+    }
+
+    function deleteFromListUsingIndexMapping(
+        uint256[] storage list, 
+        uint256 elementToDelete,
+        mapping(uint256 => uint256) storage indexMap
+    ) private {
+        uint256 ind = indexMap[elementToDelete];
+        if (ind >= list.length) return;
+        if (list.length != 1) {
+            uint256 lastEle = list[list.length - 1];
+            list[ind] = lastEle;
+            indexMap[lastEle] = ind;
+        }
+        delete indexMap[ind];
+        list.pop();
+    }
+
+    // When a habit is declined, user can delete that habit
+    function deleteHabit() public {}
+
+    function transferAmountToUser(
+        address payable user, 
+        uint amount
+    ) public payable {
+        require(!amountTransferLock);
+        amountTransferLock = true;
+        user.transfer(amount);
+        totalAmountWithdrawn += amount;
+        amountTransferLock = false;
+    }
+
 }

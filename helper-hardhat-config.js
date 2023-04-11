@@ -8,6 +8,7 @@ const networkConfig = {
         totalReports: 30,
         interval: 30,
         amount: "0.01",
+        validator: "0x097b70194015BD7e69d161deB580BB97eA923136",
     },
     80001: {
         name: "mumbai",
@@ -16,6 +17,7 @@ const networkConfig = {
         totalReports: 10,
         interval: 30,
         amount: "0.01",
+        validator: "0x097b70194015BD7e69d161deB580BB97eA923136",
     },
     31337: {
         name: "hardhat",
@@ -24,6 +26,7 @@ const networkConfig = {
         totalReports: 10,
         interval: 30,
         amount: "0.01",
+        validator: "0x097b70194015BD7e69d161deB580BB97eA923136",
     },
 }
 
